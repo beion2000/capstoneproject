@@ -1,8 +1,9 @@
 import React from "react";
 import { Link, useNavigate } from "react-router-dom";
-import { useEffect, useState, doc, updateDoc } from "react";
-import { collection, query, onSnapshot, addDoc, getDocs, deleteDoc } from "firebase/firestore";
+import { useEffect, useState } from "react";
+import { collection, doc, query, where, getDocs, deleteDoc, getDoc, updateDoc, collectionGroup } from 'firebase/firestore';
 import { db, auth } from "../firebase"; // Import Firebase authentication and database
+import { getAuth } from 'firebase/auth';
 import { useJsApiLoader, GoogleMap, Marker, Polyline, } from "@react-google-maps/api";
 import { Map } from "./Map"; 
 import Modal from "./Modal"; 
@@ -489,7 +490,8 @@ export const MyRides = () => {
     }
     return color;
   };
-{/*
+{
+  /*
   const cancelRide = async (uniqueID) => {
     try {
       console.log("Received uniqueID:", uniqueID);
@@ -566,49 +568,61 @@ export const MyRides = () => {
 
 const cancelRide = async (uniqueID) => {
   try {
+    const auth = getAuth();
     const user = auth.currentUser;
     if (!user) {
       console.log("User not logged in");
       return;
     }
 
-    // Assuming uniqueID is sufficient to uniquely identify a document in either collection
-    let foundInCollection = null;
 
-    // Try to find and delete the ride in rideRequests
-    const rideRequestsRef = collection(db, "users", user.uid, "rideRequests");
-    const rideRequestsSnapshot = await getDocs(rideRequestsRef);
-    for (const doc of rideRequestsSnapshot.docs) {
-      if (doc.id === uniqueID) {
-        await deleteDoc(doc.ref);
-        foundInCollection = "rideRequests";
-        break;
-      }
-    }
+    const userRef = doc(collection(db, "users"), user.uid);
+    const acceptedRidesRef = collection(userRef, "AcceptedRides");
 
-    // If not found in rideRequests, try in AcceptedRides
-    if (!foundInCollection) {
-      const acceptedRidesRef = collection(db, "users", user.uid, "AcceptedRides");
-      const acceptedRidesSnapshot = await getDocs(acceptedRidesRef);
-      for (const doc of acceptedRidesSnapshot.docs) {
-        if (doc.id === uniqueID) {
-          await deleteDoc(doc.ref);
-          foundInCollection = "AcceptedRides";
-          break;
+    // Directly access the document using the uniqueID
+    const docRef = doc(acceptedRidesRef, uniqueID);
+    const docSnap = await getDoc(docRef);
+
+    if (docSnap.exists()) {
+      const cancelledUniqueID = docSnap.data().uniqueID;
+      const cancelledRideData = docSnap.data();
+
+      console.log("Found ride in AcceptedRides:", cancelledUniqueID);
+      await deleteDoc(docRef);
+
+      alert("Your ride has been cancelled!");
+
+      // Update seats in all users' rideRequests subcollections
+      const allUsersRef = collection(db, "users");
+      const snapshot = await getDocs(allUsersRef);
+
+      snapshot.forEach(async (userDoc) => {
+        console.log("Checking user:", userDoc.id); // Log user ID for verification
+        const rideRequestsRef = collection(userDoc.ref, "RideRequests");
+        const rideRequestRef = doc(rideRequestsRef, cancelledUniqueID);
+        const rideRequestSnap = await getDoc(rideRequestRef);
+
+        if (rideRequestSnap.exists()) {
+          const rideRequestData = rideRequestSnap.data();
+          const updatedSeats = rideRequestData.seats + 1;
+
+          await updateDoc(rideRequestRef, { seats: updatedSeats });
+          console.log("Updated seats for ride request:", cancelledUniqueID);
+        } else {
+          console.log("Ride request not found for user:", userDoc.id);
         }
-      }
+      });
+    } else {
+      console.log("Ride not found in AcceptedRides.");
     }
-
-    // If the ride was found and deleted, update the local state
-    if (foundInCollection) {
-      const updatedRides = rideRequests.filter(ride => ride.id !== uniqueID);
-      setRideRequests(updatedRides);
-    }
-      alert("Your ride has been cancelled!")
   } catch (error) {
     console.error("Error canceling ride:", error);
   }
 };
+
+
+
+
 
   
   return (
